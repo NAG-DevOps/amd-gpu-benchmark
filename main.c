@@ -72,8 +72,28 @@ int display_device_infos(cl_device_id device_id) {
     CL_DEVICE_PREFERRED_VECTOR_WIDTH_SHORT,
     CL_DEVICE_MAX_CLOCK_FREQUENCY,
     CL_DEVICE_ADDRESS_BITS,
+    CL_DEVICE_MAX_MEM_ALLOC_SIZE,
     CL_DEVICE_MEM_BASE_ADDR_ALIGN,
+    CL_DEVICE_GLOBAL_MEM_CACHE_TYPE,
     CL_DEVICE_GLOBAL_MEM_CACHELINE_SIZE,
+    CL_DEVICE_GLOBAL_MEM_CACHE_SIZE,
+    CL_DEVICE_GLOBAL_MEM_SIZE,
+    CL_DEVICE_MAX_CONSTANT_BUFFER_SIZE,
+    CL_DEVICE_MAX_CONSTANT_ARGS,
+    CL_DEVICE_LOCAL_MEM_TYPE,
+    CL_DEVICE_LOCAL_MEM_SIZE,
+    CL_DEVICE_ERROR_CORRECTION_SUPPORT,
+    CL_DEVICE_ENDIAN_LITTLE,
+    CL_DEVICE_AVAILABLE,
+    CL_DEVICE_COMPILER_AVAILABLE,
+    CL_DEVICE_LINKER_AVAILABLE,
+    CL_DEVICE_EXECUTION_CAPABILITIES,
+    CL_DEVICE_QUEUE_ON_HOST_PROPERTIES,
+    CL_DEVICE_QUEUE_ON_DEVICE_PROPERTIES,
+    CL_DEVICE_QUEUE_ON_DEVICE_PREFERRED_SIZE,
+    CL_DEVICE_QUEUE_ON_DEVICE_MAX_SIZE,
+    CL_DEVICE_MAX_ON_DEVICE_QUEUES,
+    CL_DEVICE_PRINTF_BUFFER_SIZE,
   };
   char* ulong_info_strings[] = {
     "Vendor ID",
@@ -83,17 +103,67 @@ int display_device_infos(cl_device_id device_id) {
     "Preferred vector width short",
     "Max clock frequency (MHz)",
     "Address bits",
+    "Max memory allocation size (Bytes)",
     "Memory base address alignment",
-    "Global memory cacheline size",
+    "Global memory cache type",
+    "Global memory cacheline size (Bytes)",
+    "Global memory cache size (Bytes)",
+    "Global memory size (Bytes)",
+    "Max constant buffer size (Bytes)",
+    "Max constant arguments",
+    "Local memory type",
+    "Local memory size (Bytes)",
+    "Error correction support",
+    "Little endian device",
+    "Device Available",
+    "Compiler available",
+    "Linker available",
+    "Execution capabilities",
+    "Queue on host properties",
+    "Queue on device properties",
+    "Queue on device preferred size (Bytes)",
+    "Queue on device max size (Bytes)",
+    "Max queues per context",
+    "Printf buffer size (Bytes)",
   };
 
   printf("Device ID: %p\n", device_id);
 
+  // uint, ulong, bool, bitfields infos
   for (int i=0; i < (sizeof(ulong_infos) / sizeof(cl_device_info)); ++i) {
-    cl_ulong ulong_val;
+    cl_ulong ulong_val = 0;
     rv = clGetDeviceInfo(device_id, ulong_infos[i], sizeof(ulong_val), &ulong_val, NULL);
     if (rv != CL_SUCCESS) return rv;
     printf("* %s: %lu\n", ulong_info_strings[i], ulong_val);
+  }
+
+  cl_device_info string_infos[] = {
+    CL_DEVICE_BUILT_IN_KERNELS,
+    CL_DEVICE_NAME,
+    CL_DEVICE_VENDOR,
+    CL_DRIVER_VERSION,
+    CL_DEVICE_PROFILE,
+    CL_DEVICE_VERSION,
+    CL_DEVICE_OPENCL_C_VERSION,
+    CL_DEVICE_EXTENSIONS,
+  };
+  char* string_info_strings[] = {
+    "Built in kernels",
+    "Name",
+    "Vendor",
+    "Driver version",
+    "Profile",
+    "Device version",
+    "OpenCL C version",
+    "Extensions",
+  };
+
+  // uint, ulong, bool, bitfields infos
+  for (int i=0; i < (sizeof(string_infos) / sizeof(cl_device_info)); ++i) {
+    char buffer[BUFFER_SIZE];
+    rv = clGetDeviceInfo(device_id, string_infos[i], BUFFER_SIZE, buffer, NULL);
+    if (rv != CL_SUCCESS) return rv;
+    printf("* %s: %s\n", string_info_strings[i], buffer);
   }
 
   return CL_SUCCESS;
