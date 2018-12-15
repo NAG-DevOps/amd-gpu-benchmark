@@ -1,8 +1,12 @@
 #include "stdio.h"
 #include "CL/cl.h"
 
-#define N_STREAM_PROCESSORS 2304
-#define BUFFER_SIZE 10
+#define BENCH_START 100
+#define BENCH_STEP 100
+#define BENCH_LIMIT 32000
+
+#define BUFFER_SIZE (BENCH_LIMIT + 1)
+
 
 void check_success(cl_int rv, char* msg) {
   if (rv != CL_SUCCESS) {
@@ -27,7 +31,7 @@ int main() {
     "__kernel void kerntest(__global char* data) {",
     "  size_t id = get_global_id(0);",
     "  int tmp = data[id] - 32;",
-    "  for (int i=0; i<10000000; i++) {",
+    "  for (int i=0; i<100000; i++) {",
     "    tmp = (2*tmp + id) % 95;",
     "  }",
     "  data[id] = (char)(tmp + 32);",
@@ -74,29 +78,31 @@ int main() {
   check_success(rv, "clEnqueueWriteBuffer");
 
   // Enqueue kernel
-  size_t global_work_size[] = {4};
-  cl_event exec_wait_list[] = {write_ev};
-  cl_event exec_ev;
-  rv = clEnqueueNDRangeKernel(command_queue, kernel, 1, NULL, global_work_size,
+  for(size_t global_work_size = BENCH_START; global_work_size <= BENCH_LIMIT; global_work_size += BENCH_STEP) {
+    cl_event exec_wait_list[] = {write_ev};
+    cl_event exec_ev;
+    rv = clEnqueueNDRangeKernel(command_queue, kernel, 1, NULL, &global_work_size,
 			      NULL, 1, exec_wait_list, &exec_ev);
-  check_success(rv, "clEnqueueNDRangeKernel");
+    check_success(rv, "clEnqueueNDRangeKernel");
+    clWaitForEvents(1, &exec_ev);
+
+    // Some profiling
+    cl_ulong exec_start;
+    cl_ulong exec_end;
+    rv = clGetEventProfilingInfo(exec_ev, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &exec_start, NULL);
+    check_success(rv, "clGetEventProfilingInfo (COMMAND_START)");
+    rv = clGetEventProfilingInfo(exec_ev, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &exec_end, NULL);
+    check_success(rv, "clGetEventProfilingInfo (COMMAND_END)");
+    printf("%zd\t%lu\n", global_work_size, exec_end - exec_start);
+    fflush(stdout);
+  }
 
   // Enqueue blocking read command
-  cl_event read_wait_list[] = {exec_ev};
   rv = clEnqueueReadBuffer(command_queue, dev_buffer, CL_TRUE, 0, data_len,
-			   host_buffer, 1, read_wait_list, NULL);
+			   host_buffer, 0, NULL, NULL);
   check_success(rv, "clEnqueueReadBuffer");
+  printf("%s\n", host_buffer);
 
-  printf("Message read: %s\n", host_buffer);
-
-  // Some profiling
-  cl_ulong exec_start;
-  cl_ulong exec_end;
-  rv = clGetEventProfilingInfo(exec_ev, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &exec_start, NULL);
-  check_success(rv, "clGetEventProfilingInfo (COMMAND_START)");
-  rv = clGetEventProfilingInfo(exec_ev, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &exec_end, NULL);
-  check_success(rv, "clGetEventProfilingInfo (COMMAND_END)");
-  printf("Kernel execution time: %lu\n", exec_end - exec_start);
 
   // Free resources
   check_success(clReleaseMemObject(dev_buffer), "clReleaseMemObject");
