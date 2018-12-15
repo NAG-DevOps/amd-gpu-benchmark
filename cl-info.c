@@ -68,6 +68,7 @@ int display_device_infos(cl_device_id device_id) {
     CL_DEVICE_VENDOR_ID,
     CL_DEVICE_MAX_COMPUTE_UNITS,
     CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS,
+    CL_DEVICE_MAX_WORK_GROUP_SIZE,
     CL_DEVICE_PREFERRED_VECTOR_WIDTH_INT,
     CL_DEVICE_PREFERRED_VECTOR_WIDTH_SHORT,
     CL_DEVICE_MAX_CLOCK_FREQUENCY,
@@ -100,6 +101,7 @@ int display_device_infos(cl_device_id device_id) {
     "Vendor ID",
     "Max compute units",
     "Max work item dimensions",
+    "Max work group size",
     "Preferred vector width int",
     "Preferred vector width short",
     "Max clock frequency (MHz)",
@@ -167,6 +169,11 @@ int display_device_infos(cl_device_id device_id) {
     if (rv != CL_SUCCESS) return rv;
     printf("* %s: %s\n", string_info_strings[i], buffer);
   }
+
+  size_t mwis[3] = {0, 0, 0};
+  rv = clGetDeviceInfo(device_id, CL_DEVICE_MAX_WORK_ITEM_SIZES, sizeof(mwis), mwis, NULL);
+  if (rv != CL_SUCCESS) return rv;
+  printf("* Max work item sizes: (%zd, %zd, %zd)\n", mwis[0], mwis[1], mwis[2]);
 
   return CL_SUCCESS;
 }
