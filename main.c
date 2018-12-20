@@ -6,6 +6,7 @@
 #define BENCH_LIMIT 32000
 
 #define BUFFER_SIZE (BENCH_LIMIT + 1)
+#define SOURCE_SIZE 1024
 
 
 void check_success(cl_int rv, char* msg) {
@@ -15,11 +16,27 @@ void check_success(cl_int rv, char* msg) {
   }
 }
 
+char* get_opencl_source(char* buf, int nloops) {
+  const char* fmt =
+    "__kernel void kerntest(__global char* data) {"
+    "  size_t id = get_global_id(0);"
+    "  int tmp = data[id] - 32;"
+    "  for (int i=0; i<%d; i++) {"
+    "    tmp = (2*tmp + id) % 95;"
+    "  }"
+    "  data[id] = (char)(tmp + 32);"
+    "}";
+  sprintf(buf, fmt, nloops);
+  return buf;
+}
+
 int main() {
   cl_int rv; // OpenCL calls return value
   const char message[] = "Hello World!";
   char host_buffer[BUFFER_SIZE];
   int data_len = BUFFER_SIZE-1;
+  char source_buffer[SOURCE_SIZE];
+  char *opencl_source = get_opencl_source(source_buffer, 100000);
 
   // Filling host buffer with our message
   for (int i=0; i < data_len; i++) {
@@ -27,17 +44,6 @@ int main() {
   }
   host_buffer[data_len] = '\0';
 
-  const char* opencl_source[] = {
-    "__kernel void kerntest(__global char* data) {",
-    "  size_t id = get_global_id(0);",
-    "  int tmp = data[id] - 32;",
-    "  for (int i=0; i<100000; i++) {",
-    "    tmp = (2*tmp + id) % 95;",
-    "  }",
-    "  data[id] = (char)(tmp + 32);",
-    "}",
-  };
-  int opencl_lines_cnt = sizeof(opencl_source) / sizeof(char*);
 
   // Assuming only 1 platform and 1 device
   cl_platform_id platform_id;
@@ -63,7 +69,7 @@ int main() {
   check_success(rv, "clCreateBuffer");
 
   // Create a program and kernel from the OpenCL source code
-  cl_program program = clCreateProgramWithSource(context, opencl_lines_cnt, opencl_source, NULL, &rv);
+  cl_program program = clCreateProgramWithSource(context, 1, (const char**) &opencl_source, NULL, &rv);
   check_success(rv, "clCreateProgramWithSource");
   check_success(clBuildProgram(program, 1, &device_id, NULL, NULL, NULL), "clBuildProgram");
 
