@@ -7,7 +7,7 @@
 
 #define LOOPCNT_START 10000
 #define LOOPCNT_STEP 10000
-#define LOOPCNT_LIMIT 1000000
+#define LOOPCNT_LIMIT 500000
 
 #define BUFFER_SIZE (BENCH_LIMIT + 1)
 #define SOURCE_SIZE 1024
@@ -32,6 +32,24 @@ char* get_opencl_source(char* buf, int nloops) {
     "}";
   sprintf(buf, fmt, nloops);
   return buf;
+}
+
+cl_int execute_kernel(cl_command_queue queue, cl_kernel kernel, size_t n_workers, size_t* duration) {
+      cl_event exec_ev;
+      cl_int rv = clEnqueueNDRangeKernel(queue, kernel, 1, NULL, &n_workers, NULL, 0, NULL, &exec_ev);
+      if (rv) return rv;
+      clWaitForEvents(1, &exec_ev);
+
+      // Profiling
+      cl_ulong exec_start;
+      cl_ulong exec_end;
+      rv = clGetEventProfilingInfo(exec_ev, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &exec_start, NULL);
+      if (rv) return rv;
+      rv = clGetEventProfilingInfo(exec_ev, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &exec_end, NULL);
+      if (rv) return rv;
+
+      *duration = exec_end - exec_start;
+      return 0;
 }
 
 int main() {
@@ -70,11 +88,12 @@ int main() {
   cl_mem dev_buffer = clCreateBuffer(context, 0, BUFFER_SIZE, NULL, &rv);
   check_success(rv, "clCreateBuffer");
 
-  // Enqueue write command
+  // Write initial data set into device buffer
   cl_event write_ev;
   rv = clEnqueueWriteBuffer(command_queue, dev_buffer, CL_FALSE, 0, data_len,
 			    host_buffer, 0, NULL, &write_ev);
   check_success(rv, "clEnqueueWriteBuffer");
+  clWaitForEvents(1, &write_ev);
 
   for (int loop_cnt = LOOPCNT_START; loop_cnt <= LOOPCNT_LIMIT; loop_cnt += LOOPCNT_STEP) {
     char *opencl_source = get_opencl_source(source_buffer, loop_cnt);
@@ -90,21 +109,10 @@ int main() {
 
     // Enqueue kernel
     for(size_t global_work_size = BENCH_START; global_work_size <= BENCH_LIMIT; global_work_size += BENCH_STEP) {
-      cl_event exec_wait_list[] = {write_ev};
-      cl_event exec_ev;
-      rv = clEnqueueNDRangeKernel(command_queue, kernel, 1, NULL, &global_work_size,
-				  NULL, 1, exec_wait_list, &exec_ev);
-      check_success(rv, "clEnqueueNDRangeKernel");
-      clWaitForEvents(1, &exec_ev);
-
-      // Some profiling
-      cl_ulong exec_start;
-      cl_ulong exec_end;
-      rv = clGetEventProfilingInfo(exec_ev, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &exec_start, NULL);
-      check_success(rv, "clGetEventProfilingInfo (COMMAND_START)");
-      rv = clGetEventProfilingInfo(exec_ev, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &exec_end, NULL);
-      check_success(rv, "clGetEventProfilingInfo (COMMAND_END)");
-      printf("%d\t%zd\t%lu\n", loop_cnt, global_work_size, exec_end - exec_start);
+      size_t duration;
+      rv = execute_kernel(command_queue, kernel, global_work_size, &duration);
+      check_success(rv, "execute_kernel");
+      printf("%d\t%zd\t%lu\n", loop_cnt, global_work_size, duration);
       fflush(stdout);
     }
   }
