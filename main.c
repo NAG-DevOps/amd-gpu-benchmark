@@ -34,22 +34,39 @@ char* get_opencl_source(char* buf, int nloops) {
   return buf;
 }
 
+cl_int get_kernel(cl_context context, cl_device_id device_id, cl_mem dev_buffer, int loop_cnt, cl_kernel *kernel) {
+  char source_buffer[SOURCE_SIZE];
+  char *opencl_source = get_opencl_source(source_buffer, loop_cnt);
+
+  // Create a program and kernel from the OpenCL source code
+  cl_int rv;
+  cl_program program = clCreateProgramWithSource(context, 1, (const char**) &opencl_source, NULL, &rv);
+  if (rv) return rv;
+  rv = clBuildProgram(program, 1, &device_id, NULL, NULL, NULL);
+  if (rv) return rv;
+
+  *kernel = clCreateKernel(program, "kerntest", &rv);
+  if (rv) return rv;
+  rv = clSetKernelArg(*kernel, 0, sizeof(dev_buffer), &dev_buffer);
+  return rv;
+}
+
 cl_int execute_kernel(cl_command_queue queue, cl_kernel kernel, size_t n_workers, size_t* duration) {
-      cl_event exec_ev;
-      cl_int rv = clEnqueueNDRangeKernel(queue, kernel, 1, NULL, &n_workers, NULL, 0, NULL, &exec_ev);
-      if (rv) return rv;
-      clWaitForEvents(1, &exec_ev);
+  cl_event exec_ev;
+  cl_int rv = clEnqueueNDRangeKernel(queue, kernel, 1, NULL, &n_workers, NULL, 0, NULL, &exec_ev);
+  if (rv) return rv;
+  clWaitForEvents(1, &exec_ev);
 
-      // Profiling
-      cl_ulong exec_start;
-      cl_ulong exec_end;
-      rv = clGetEventProfilingInfo(exec_ev, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &exec_start, NULL);
-      if (rv) return rv;
-      rv = clGetEventProfilingInfo(exec_ev, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &exec_end, NULL);
-      if (rv) return rv;
+  // Profiling
+  cl_ulong exec_start;
+  cl_ulong exec_end;
+  rv = clGetEventProfilingInfo(exec_ev, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &exec_start, NULL);
+  if (rv) return rv;
+  rv = clGetEventProfilingInfo(exec_ev, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &exec_end, NULL);
+  if (rv) return rv;
 
-      *duration = exec_end - exec_start;
-      return 0;
+  *duration = exec_end - exec_start;
+  return 0;
 }
 
 int main() {
@@ -57,7 +74,6 @@ int main() {
   const char message[] = "Hello World!";
   char host_buffer[BUFFER_SIZE];
   int data_len = BUFFER_SIZE-1;
-  char source_buffer[SOURCE_SIZE];
 
   // Filling host buffer with our message
   for (int i=0; i < data_len; i++) {
@@ -96,22 +112,12 @@ int main() {
   clWaitForEvents(1, &write_ev);
 
   for (int loop_cnt = LOOPCNT_START; loop_cnt <= LOOPCNT_LIMIT; loop_cnt += LOOPCNT_STEP) {
-    char *opencl_source = get_opencl_source(source_buffer, loop_cnt);
+    cl_kernel kernel;
+    check_success(get_kernel(context, device_id, dev_buffer, loop_cnt, &kernel), "get_kernel");
 
-    // Create a program and kernel from the OpenCL source code
-    cl_program program = clCreateProgramWithSource(context, 1, (const char**) &opencl_source, NULL, &rv);
-    check_success(rv, "clCreateProgramWithSource");
-    check_success(clBuildProgram(program, 1, &device_id, NULL, NULL, NULL), "clBuildProgram");
-
-    cl_kernel kernel = clCreateKernel(program, "kerntest", &rv);
-    check_success(rv, "clCreateKernel");
-    check_success(clSetKernelArg(kernel, 0, sizeof(dev_buffer), &dev_buffer), "clSetKernelArg");
-
-    // Enqueue kernel
     for(size_t global_work_size = BENCH_START; global_work_size <= BENCH_LIMIT; global_work_size += BENCH_STEP) {
       size_t duration;
-      rv = execute_kernel(command_queue, kernel, global_work_size, &duration);
-      check_success(rv, "execute_kernel");
+      check_success(execute_kernel(command_queue, kernel, global_work_size, &duration), "execute_kernel");
       printf("%d\t%zd\t%lu\n", loop_cnt, global_work_size, duration);
       fflush(stdout);
     }
