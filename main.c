@@ -1,8 +1,9 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include "CL/cl.h"
 
 #define DEFAULT_WORKERS_CNT 1
-#define DEFAULT_LOOPS_CNT 10000
+#define DEFAULT_LOOPS_CNT 100000
 
 #define WARMUP_WORKERS_CNT 100000
 #define WARMUP_LOOPS_CNT 100000
@@ -11,9 +12,9 @@
 #define NWORKERS_STEP 1000
 #define NWORKERS_END 100000
 
-#define LOOPCNT_START 1000
-#define LOOPCNT_STEP 1000
-#define LOOPCNT_END 100000
+#define LOOPCNT_START 10000
+#define LOOPCNT_STEP 10000
+#define LOOPCNT_END 1000000
 
 #define BUFFER_SIZE 100001
 
@@ -187,7 +188,6 @@ void init_host_buffer(char* buffer, int length) {
   buffer[length-1] = '\0';
 }
 
-
 cl_int do_bench_warmup(const be_kernel *kern) {
   cl_int rv;
   size_t duration;
@@ -208,7 +208,7 @@ cl_int do_bench_loops(FILE* out, const be_kernel *kern, int start, int end, int 
     rv = be_kernel_run(kern, DEFAULT_WORKERS_CNT, &duration);
     if (rv) return rv;
 
-    fprintf(out, "%d\t%lu\n", loops_cnt, duration);
+    fprintf(out, "%d\t%lu\n", loops_cnt, duration); // duration is in ns
   }
   return 0;
 }
@@ -223,7 +223,7 @@ cl_int do_bench_workers(FILE* out, const be_kernel *kern, int start, int end, in
     rv = be_kernel_run(kern, n_workers, &duration);
     if (rv) return rv;
 
-    fprintf(out, "%zd\t%lu\n", n_workers, duration);
+    fprintf(out, "%zd\t%lu\n", n_workers*DEFAULT_LOOPS_CNT, duration);
   }
   return 0;
 }
@@ -250,17 +250,23 @@ int main() {
   rv = be_kernel_write_buffer(&bench_kern, host_buffer, data_len);
   check_cl_success(rv, "be_kernel_write_buffer");
 
-  fd = fopen("bench_loops.txt", "w");
+  printf("Benching GPU loops ...");
+  fflush(stdout);
+  fd = fopen("bench_gpu_loops.txt", "w");
   check_fd_open(fd);
   rv = do_bench_loops(fd, &bench_kern, LOOPCNT_START, LOOPCNT_END, LOOPCNT_STEP);
   check_cl_success(rv, "do_bench_loops");
   check_fd_close(fclose(fd));
+  printf(" done\n");
 
-  fd = fopen("bench_workers.txt", "w");
+  printf("Benching GPU workers ...");
+  fflush(stdout);
+  fd = fopen("bench_gpu_workers.txt", "w");
   check_fd_open(fd);
   rv = do_bench_workers(fd, &bench_kern, NWORKERS_START, NWORKERS_END, NWORKERS_STEP);
   check_cl_success(rv, "do_bench_workers");
   check_fd_close(fclose(fd));
+  printf(" done\n");
 
   rv = be_kernel_read_buffer(&bench_kern, host_buffer, data_len);
   check_cl_success(rv, "be_kernel_read_buffer");

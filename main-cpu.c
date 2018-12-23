@@ -1,30 +1,91 @@
-#include "stdio.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
 
-#define N_STREAM_PROCESSORS 9216
-#define BUFFER_SIZE (N_STREAM_PROCESSORS + 1)
+#define DEFAULT_WORKERS_CNT 1
+#define DEFAULT_LOOPS_CNT 1000
 
-void kerntest(char* data, int id) {
+#define NWORKERS_START 100
+#define NWORKERS_STEP 100
+#define NWORKERS_END 10000
+
+#define LOOPCNT_START 100000
+#define LOOPCNT_STEP 100000
+#define LOOPCNT_END 10000000
+
+#define BUFFER_SIZE 10001
+
+void check_fd_open(FILE* fd) {
+  if (!fd) {
+    perror(NULL);
+    exit(EXIT_FAILURE);
+  }
+}
+
+void check_fd_close(int rv) {
+  if (rv) {
+    perror(NULL);
+    exit(EXIT_FAILURE);
+  }
+}
+
+void kerntest(int id, char* data, int loops_cnt) {
   int tmp = data[id] - 32;
-  for (int i=0; i<1000000; i++) {
+  for (int i=0; i<loops_cnt; i++) {
     tmp = (2*tmp + id) % 95;
   }
   data[id] = (char)(tmp + 32);
 }
 
-int main() {
+void init_host_buffer(char* buffer, int length) {
   const char message[] = "Hello World!";
+  for (int i=0; i < length; i++) {
+    buffer[i] = message[i % (sizeof(message) - 1)];
+  }
+  buffer[length-1] = '\0';
+}
+
+void do_bench_loops(FILE* out, char* buffer, int start, int end, int step) {
+  for (int loops_cnt = start; loops_cnt <= end; loops_cnt += step) {
+    clock_t t_start = clock();
+    kerntest(0, buffer, loops_cnt);
+    clock_t t_end = clock();
+    unsigned long duration = (t_end - t_start) * 1000000000 / CLOCKS_PER_SEC; // ns
+    fprintf(out, "%d\t%lu\n", loops_cnt, duration);
+  }
+}
+
+void do_bench_workers(FILE* out, char* buffer, int start, int end, int step) {
+  for (int n_workers = start; n_workers <= end; n_workers += step) {
+    clock_t t_start = clock();
+    for (int i=0; i<n_workers; i++) {
+      kerntest(i, buffer, DEFAULT_LOOPS_CNT);
+    }
+    clock_t t_end = clock();
+    unsigned long duration = (t_end - t_start) * 1000000000 / CLOCKS_PER_SEC;
+    fprintf(out, "%d\t%lu\n", n_workers*DEFAULT_LOOPS_CNT, duration);
+  }
+}
+
+int main() {
+  FILE* fd;
   char host_buffer[BUFFER_SIZE];
-  int data_len = BUFFER_SIZE-1;
+  int data_len = sizeof(host_buffer);
+  init_host_buffer(host_buffer, data_len);
 
-  // Filling host buffer with our message
-  for (int i=0; i < data_len; i++) {
-    host_buffer[i] = message[i % (sizeof(message) - 1)];
-  }
-  host_buffer[data_len] = '\0';
+  printf("Benching CPU loops ...");
+  fflush(stdout);
+  fd = fopen("bench_cpu_loops.txt", "w");
+  check_fd_open(fd);
+  do_bench_loops(fd, host_buffer, LOOPCNT_START, LOOPCNT_END, LOOPCNT_STEP);
+  check_fd_close(fclose(fd));
+  printf(" done\n");
 
-  for (int i=0; i<N_STREAM_PROCESSORS; i++) {
-    kerntest(host_buffer, i);
-  }
-
-  printf("Message read: %s\n", host_buffer);
+  printf("Benching CPU workers ...");
+  fflush(stdout);
+  fd = fopen("bench_cpu_workers.txt", "w");
+  check_fd_open(fd);
+  do_bench_workers(fd, host_buffer, NWORKERS_START, NWORKERS_END, NWORKERS_STEP);
+  check_fd_close(fclose(fd));
+  printf(" done\n");
 }
