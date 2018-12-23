@@ -20,24 +20,60 @@
  * be_* for bench specific structures.
  */
 
-struct be_device {
+typedef struct _be_device {
   cl_platform_id platform_id;
   cl_device_id device_id;
   cl_context context;
   cl_command_queue command_queue;
-};
+} be_device;
 
-struct be_kernel {
+typedef struct _be_kernel {
   cl_mem dev_buffer;
   cl_program program;
   cl_kernel kernel;
-};
+} be_kernel;
 
 void check_success(cl_int rv, char* msg) {
   if (rv != CL_SUCCESS) {
     fprintf(stderr, "%s call failed with return code: %d\n", msg, rv);
     exit(EXIT_FAILURE);
   }
+}
+
+/*
+ * Initialize an OpenCL device for our benchmarks.
+ * Assuming only 1 platform and 1 device.
+ */
+cl_int be_device_init(be_device* dev) {
+  cl_int rv;
+  rv = clGetPlatformIDs(1, &(dev->platform_id), NULL);
+  if (rv) return rv;
+  rv = clGetDeviceIDs(dev->platform_id, CL_DEVICE_TYPE_ALL, 1, &(dev->device_id), NULL);
+  if (rv) return rv;
+
+  // Create the OpenCL context
+  const cl_context_properties context_properties[] = {
+    CL_CONTEXT_PLATFORM, (cl_context_properties)dev->platform_id, 0
+  };
+  dev->context = clCreateContext(context_properties, 1, &(dev->device_id), NULL, NULL, &rv);
+  if (rv) return rv;
+
+  // Create a command queue
+  // RX480 doesn't allow device side queues (cf cl-info)
+  const cl_command_queue_properties q_props[] = {CL_QUEUE_PROPERTIES, CL_QUEUE_PROFILING_ENABLE, 0};
+  dev->command_queue = clCreateCommandQueueWithProperties(dev->context, dev->device_id, q_props, &rv);
+  if (rv) return rv;
+
+  return 0;
+}
+
+cl_int be_device_release(be_device *dev) {
+  cl_int rv;
+  rv = clReleaseCommandQueue(dev->command_queue);
+  if (rv) return rv;
+  rv = clReleaseContext(dev->context);
+  if (rv) return rv;
+  return 0;
 }
 
 char* get_opencl_source(char* buf, int nloops) {
@@ -139,24 +175,9 @@ int main() {
   }
   host_buffer[data_len] = '\0';
 
-  struct be_device bench_dev;
-
-  // Assuming only 1 platform and 1 device
-  check_success(clGetPlatformIDs(1, &(bench_dev.platform_id), NULL), "clGetPlatformIDs");
-  check_success(clGetDeviceIDs(bench_dev.platform_id, CL_DEVICE_TYPE_ALL, 1, &(bench_dev.device_id), NULL), "clGetDeviceIDs");
-
-  // Create the OpenCL context
-  const cl_context_properties context_properties[] = {
-    CL_CONTEXT_PLATFORM, (cl_context_properties)bench_dev.platform_id, 0
-  };
-  bench_dev.context = clCreateContext(context_properties, 1, &(bench_dev.device_id), NULL, NULL, &rv);
-  check_success(rv, "clCreateContext");
-
-  // Create a command queue (default properties - i.e in-order host command queue)
-  // It looks like the RX480 doesn't allow device size queues (cf cl-info)
-  const cl_command_queue_properties q_props[] = {CL_QUEUE_PROPERTIES, CL_QUEUE_PROFILING_ENABLE, 0};
-  bench_dev.command_queue = clCreateCommandQueueWithProperties(bench_dev.context, bench_dev.device_id, q_props, &rv);
-  check_success(rv, "clCreateCommandQueueWithProperties");
+  be_device bench_dev;
+  rv = be_device_init(&bench_dev);
+  check_success(rv, "be_device_init");
 
   // Create a on-device memory buffer with default properties (i.e read-write no host-mapped)
   cl_mem dev_buffer = clCreateBuffer(bench_dev.context, 0, BUFFER_SIZE, NULL, &rv);
@@ -185,9 +206,8 @@ int main() {
   check_success(rv, "clEnqueueReadBuffer");
   // printf("%s\n", host_buffer);
 
-
   // Free resources
   check_success(clReleaseMemObject(dev_buffer), "clReleaseMemObject");
-  check_success(clReleaseCommandQueue(bench_dev.command_queue), "clReleaseCommandQueue");
-  check_success(clReleaseContext(bench_dev.context), "clReleaseContext");
+  rv = be_device_release(&bench_dev);
+  check_success(rv, "be_device_release");
 }
