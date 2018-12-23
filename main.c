@@ -1,4 +1,4 @@
-#include "stdio.h"
+#include <stdio.h>
 #include "CL/cl.h"
 
 #define BUFFER_SIZE (50000 + 1)
@@ -76,27 +76,20 @@ cl_int be_device_release(be_device *dev) {
   return 0;
 }
 
-char* get_opencl_source(char* buf, int nloops) {
-  const char* fmt =
-    "__kernel void kerntest(__global char* data) {"
+cl_int get_kernel(cl_context context, cl_device_id device_id, cl_mem dev_buffer, int loop_cnt, cl_kernel *kernel) {
+  const char *opencl_source =
+    "__kernel void kerntest(__global char* data, int loops_cnt) {"
     "  size_t id = get_global_id(0);"
     "  int tmp = data[id] - 32;"
-    "  for (int i=0; i<%d; i++) {"
+    "  for (int i=0; i<loops_cnt; i++) {"
     "    tmp = (2*tmp + id) % 95;"
     "  }"
     "  data[id] = (char)(tmp + 32);"
     "}";
-  sprintf(buf, fmt, nloops);
-  return buf;
-}
-
-cl_int get_kernel(cl_context context, cl_device_id device_id, cl_mem dev_buffer, int loop_cnt, cl_kernel *kernel) {
-  char source_buffer[SOURCE_SIZE];
-  char *opencl_source = get_opencl_source(source_buffer, loop_cnt);
 
   // Create a program and kernel from the OpenCL source code
   cl_int rv;
-  cl_program program = clCreateProgramWithSource(context, 1, (const char**) &opencl_source, NULL, &rv);
+  cl_program program = clCreateProgramWithSource(context, 1, &opencl_source, NULL, &rv);
   if (rv) return rv;
   rv = clBuildProgram(program, 1, &device_id, NULL, NULL, NULL);
   if (rv) return rv;
@@ -104,6 +97,8 @@ cl_int get_kernel(cl_context context, cl_device_id device_id, cl_mem dev_buffer,
   *kernel = clCreateKernel(program, "kerntest", &rv);
   if (rv) return rv;
   rv = clSetKernelArg(*kernel, 0, sizeof(dev_buffer), &dev_buffer);
+  if (rv) return rv;
+  rv = clSetKernelArg(*kernel, 1, sizeof(loop_cnt), &loop_cnt);
   return rv;
 }
 
