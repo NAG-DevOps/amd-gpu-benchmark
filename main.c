@@ -1,8 +1,6 @@
 #include <stdio.h>
 #include "CL/cl.h"
 
-#define BUFFER_SIZE (50000 + 1)
-
 #define DEFAULT_WORKERS_CNT 1
 #define DEFAULT_LOOPS_CNT 10000
 
@@ -16,6 +14,8 @@
 #define LOOPCNT_START 1000
 #define LOOPCNT_STEP 1000
 #define LOOPCNT_END 100000
+
+#define BUFFER_SIZE 100001
 
 /*
  * be_* for bench specific structures.
@@ -35,12 +35,27 @@ typedef struct _be_kernel {
   cl_mem buffer;
 } be_kernel;
 
-void check_success(cl_int rv, char* msg) {
+void check_cl_success(cl_int rv, char* msg) {
   if (rv != CL_SUCCESS) {
     fprintf(stderr, "%s call failed with return code: %d\n", msg, rv);
     exit(EXIT_FAILURE);
   }
 }
+
+void check_fd_open(FILE* fd) {
+  if (!fd) {
+    perror(NULL);
+    exit(EXIT_FAILURE);
+  }
+}
+
+void check_fd_close(int rv) {
+  if (rv) {
+    perror(NULL);
+    exit(EXIT_FAILURE);
+  }
+}
+
 
 /*
  * Initialize an OpenCL device for our benchmarks.
@@ -183,7 +198,7 @@ cl_int do_bench_warmup(const be_kernel *kern) {
   return 0;
 }
 
-cl_int do_bench_loops(const be_kernel *kern, int start, int end, int step) {
+cl_int do_bench_loops(FILE* out, const be_kernel *kern, int start, int end, int step) {
   cl_int rv;
   for (int loops_cnt = start; loops_cnt <= end; loops_cnt += step) {
     rv = be_kernel_set_loopcnt(kern, loops_cnt);
@@ -193,13 +208,12 @@ cl_int do_bench_loops(const be_kernel *kern, int start, int end, int step) {
     rv = be_kernel_run(kern, DEFAULT_WORKERS_CNT, &duration);
     if (rv) return rv;
 
-    printf("%d\t%lu\n", loops_cnt, duration);
-    fflush(stdout);
+    fprintf(out, "%d\t%lu\n", loops_cnt, duration);
   }
   return 0;
 }
 
-cl_int do_bench_workers(const be_kernel *kern, int start, int end, int step) {
+cl_int do_bench_workers(FILE* out, const be_kernel *kern, int start, int end, int step) {
   cl_int rv;
   rv = be_kernel_set_loopcnt(kern, DEFAULT_LOOPS_CNT);
   if (rv) return rv;
@@ -209,46 +223,52 @@ cl_int do_bench_workers(const be_kernel *kern, int start, int end, int step) {
     rv = be_kernel_run(kern, n_workers, &duration);
     if (rv) return rv;
 
-    printf("%zd\t%lu\n", n_workers, duration);
-    fflush(stdout);
+    fprintf(out, "%zd\t%lu\n", n_workers, duration);
   }
   return 0;
 }
 
 int main() {
   cl_int rv; // OpenCL calls return value
+  FILE* fd;
 
   be_device bench_dev;
   rv = be_device_init(&bench_dev);
-  check_success(rv, "be_device_init");
+  check_cl_success(rv, "be_device_init");
 
   be_kernel bench_kern;
   rv = be_kernel_init(&bench_dev, &bench_kern);
-  check_success(rv, "be_kernel_init");
+  check_cl_success(rv, "be_kernel_init");
 
   char host_buffer[BUFFER_SIZE];
   int data_len = sizeof(host_buffer);
   init_host_buffer(host_buffer, data_len);
 
   rv = do_bench_warmup(&bench_kern);
-  check_success(rv, "do_bench_warmup");
+  check_cl_success(rv, "do_bench_warmup");
 
   rv = be_kernel_write_buffer(&bench_kern, host_buffer, data_len);
-  check_success(rv, "be_kernel_write_buffer");
+  check_cl_success(rv, "be_kernel_write_buffer");
 
-  rv = do_bench_loops(&bench_kern, LOOPCNT_START, LOOPCNT_END, LOOPCNT_STEP);
-  check_success(rv, "do_bench_loops");
+  fd = fopen("bench_loops.txt", "w");
+  check_fd_open(fd);
+  rv = do_bench_loops(fd, &bench_kern, LOOPCNT_START, LOOPCNT_END, LOOPCNT_STEP);
+  check_cl_success(rv, "do_bench_loops");
+  check_fd_close(fclose(fd));
 
-  //rv = do_bench_workers(&bench_kern, NWORKERS_START, NWORKERS_END, NWORKERS_STEP);
-  //check_success(rv, "do_bench_workers");
+  fd = fopen("bench_workers.txt", "w");
+  check_fd_open(fd);
+  rv = do_bench_workers(fd, &bench_kern, NWORKERS_START, NWORKERS_END, NWORKERS_STEP);
+  check_cl_success(rv, "do_bench_workers");
+  check_fd_close(fclose(fd));
 
   rv = be_kernel_read_buffer(&bench_kern, host_buffer, data_len);
-  check_success(rv, "be_kernel_read_buffer");
+  check_cl_success(rv, "be_kernel_read_buffer");
   //printf("%s\n", host_buffer);
 
   // Free resources
   rv = be_kernel_release(&bench_kern);
-  check_success(rv, "be_kernel_release");
+  check_cl_success(rv, "be_kernel_release");
   rv = be_device_release(&bench_dev);
-  check_success(rv, "be_device_release");
+  check_cl_success(rv, "be_device_release");
 }
