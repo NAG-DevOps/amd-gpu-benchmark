@@ -1,17 +1,37 @@
 #include "stdio.h"
 #include "CL/cl.h"
 
-#define BENCH_START 100
-#define BENCH_STEP 100
-#define BENCH_LIMIT 100
+#define BUFFER_SIZE (50000 + 1)
+
+#define DEFAULT_N_WORKERS 1024
+#define DEFAULT_N_LOOPS 100000
+
+#define NWORKERS_START 1000
+#define NWORKERS_STEP 1000
+#define NWORKERS_END 50000
 
 #define LOOPCNT_START 10000
 #define LOOPCNT_STEP 10000
-#define LOOPCNT_LIMIT 500000
+#define LOOPCNT_END 500000
 
-#define BUFFER_SIZE (BENCH_LIMIT + 1)
 #define SOURCE_SIZE 1024
 
+/*
+ * be_* for bench specific structures.
+ */
+
+struct be_device {
+  cl_platform_id platform_id;
+  cl_device_id device_id;
+  cl_context context;
+  cl_command_queue command_queue;
+};
+
+struct be_kernel {
+  cl_mem dev_buffer;
+  cl_program program;
+  cl_kernel kernel;
+};
 
 void check_success(cl_int rv, char* msg) {
   if (rv != CL_SUCCESS) {
@@ -69,6 +89,44 @@ cl_int execute_kernel(cl_command_queue queue, cl_kernel kernel, size_t n_workers
   return 0;
 }
 
+cl_int do_bench_loops(cl_context context, cl_device_id device_id, cl_mem dev_buffer,
+		      cl_command_queue queue, size_t n_workers,
+		      int start, int end, int step) {
+  cl_int rv;
+  for (int loop_cnt = start; loop_cnt <= end; loop_cnt += step) {
+    cl_kernel kernel;
+    rv = get_kernel(context, device_id, dev_buffer, loop_cnt, &kernel);
+    if (rv) return rv;
+
+    size_t duration;
+    rv = execute_kernel(queue, kernel, n_workers, &duration);
+    if (rv) return rv;
+
+    printf("%d\t%zd\t%lu\n", loop_cnt, n_workers, duration);
+    fflush(stdout);
+  }
+  return 0;
+}
+
+cl_int do_bench_workers(cl_context context, cl_device_id device_id, cl_mem dev_buffer,
+			cl_command_queue queue, int n_loops,
+			int start, int end, int step) {
+  cl_int rv;
+  cl_kernel kernel;
+  rv = get_kernel(context, device_id, dev_buffer, n_loops, &kernel);
+  if (rv) return rv;
+
+  for (size_t n_workers = start; n_workers <= end; n_workers += step) {
+    size_t duration;
+    rv = execute_kernel(queue, kernel, n_workers, &duration);
+    if (rv) return rv;
+
+    printf("%d\t%zd\t%lu\n", n_loops, n_workers, duration);
+    fflush(stdout);
+  }
+  return 0;
+}
+
 int main() {
   cl_int rv; // OpenCL calls return value
   const char message[] = "Hello World!";
@@ -81,57 +139,55 @@ int main() {
   }
   host_buffer[data_len] = '\0';
 
+  struct be_device bench_dev;
+
   // Assuming only 1 platform and 1 device
-  cl_platform_id platform_id;
-  check_success(clGetPlatformIDs(1, &platform_id, NULL), "clGetPlatformIDs");
-  cl_device_id device_id;
-  check_success(clGetDeviceIDs(platform_id, CL_DEVICE_TYPE_ALL, 1, &device_id, NULL), "clGetDeviceIDs");
+  check_success(clGetPlatformIDs(1, &(bench_dev.platform_id), NULL), "clGetPlatformIDs");
+  check_success(clGetDeviceIDs(bench_dev.platform_id, CL_DEVICE_TYPE_ALL, 1, &(bench_dev.device_id), NULL), "clGetDeviceIDs");
 
   // Create the OpenCL context
   const cl_context_properties context_properties[] = {
-    CL_CONTEXT_PLATFORM, (cl_context_properties)platform_id, 0
+    CL_CONTEXT_PLATFORM, (cl_context_properties)bench_dev.platform_id, 0
   };
-  cl_context context = clCreateContext(context_properties, 1, &device_id, NULL, NULL, &rv);
+  bench_dev.context = clCreateContext(context_properties, 1, &(bench_dev.device_id), NULL, NULL, &rv);
   check_success(rv, "clCreateContext");
 
   // Create a command queue (default properties - i.e in-order host command queue)
   // It looks like the RX480 doesn't allow device size queues (cf cl-info)
   const cl_command_queue_properties q_props[] = {CL_QUEUE_PROPERTIES, CL_QUEUE_PROFILING_ENABLE, 0};
-  cl_command_queue command_queue = clCreateCommandQueueWithProperties(context, device_id, q_props, &rv);
+  bench_dev.command_queue = clCreateCommandQueueWithProperties(bench_dev.context, bench_dev.device_id, q_props, &rv);
   check_success(rv, "clCreateCommandQueueWithProperties");
 
   // Create a on-device memory buffer with default properties (i.e read-write no host-mapped)
-  cl_mem dev_buffer = clCreateBuffer(context, 0, BUFFER_SIZE, NULL, &rv);
+  cl_mem dev_buffer = clCreateBuffer(bench_dev.context, 0, BUFFER_SIZE, NULL, &rv);
   check_success(rv, "clCreateBuffer");
 
   // Write initial data set into device buffer
   cl_event write_ev;
-  rv = clEnqueueWriteBuffer(command_queue, dev_buffer, CL_FALSE, 0, data_len,
+  rv = clEnqueueWriteBuffer(bench_dev.command_queue, dev_buffer, CL_FALSE, 0, data_len,
 			    host_buffer, 0, NULL, &write_ev);
   check_success(rv, "clEnqueueWriteBuffer");
   clWaitForEvents(1, &write_ev);
 
-  for (int loop_cnt = LOOPCNT_START; loop_cnt <= LOOPCNT_LIMIT; loop_cnt += LOOPCNT_STEP) {
-    cl_kernel kernel;
-    check_success(get_kernel(context, device_id, dev_buffer, loop_cnt, &kernel), "get_kernel");
+  //rv = do_bench_loops(context, device_id, dev_buffer,
+  //		      command_queue, DEFAULT_N_WORKERS,
+  //		      LOOPCNT_START, LOOPCNT_END, LOOPCNT_STEP);
+  //check_success(rv, "do_bench_loops");
 
-    for(size_t global_work_size = BENCH_START; global_work_size <= BENCH_LIMIT; global_work_size += BENCH_STEP) {
-      size_t duration;
-      check_success(execute_kernel(command_queue, kernel, global_work_size, &duration), "execute_kernel");
-      printf("%d\t%zd\t%lu\n", loop_cnt, global_work_size, duration);
-      fflush(stdout);
-    }
-  }
+  rv = do_bench_workers(bench_dev.context, bench_dev.device_id, dev_buffer,
+			bench_dev.command_queue, DEFAULT_N_LOOPS,
+			NWORKERS_START, NWORKERS_END, NWORKERS_STEP);
+  check_success(rv, "do_bench_workers");
 
   // Enqueue blocking read command
-  rv = clEnqueueReadBuffer(command_queue, dev_buffer, CL_TRUE, 0, data_len,
+  rv = clEnqueueReadBuffer(bench_dev.command_queue, dev_buffer, CL_TRUE, 0, data_len,
 			   host_buffer, 0, NULL, NULL);
   check_success(rv, "clEnqueueReadBuffer");
-  printf("%s\n", host_buffer);
+  // printf("%s\n", host_buffer);
 
 
   // Free resources
   check_success(clReleaseMemObject(dev_buffer), "clReleaseMemObject");
-  check_success(clReleaseCommandQueue(command_queue), "clReleaseCommandQueue");
-  check_success(clReleaseContext(context), "clReleaseContext");
+  check_success(clReleaseCommandQueue(bench_dev.command_queue), "clReleaseCommandQueue");
+  check_success(clReleaseContext(bench_dev.context), "clReleaseContext");
 }
