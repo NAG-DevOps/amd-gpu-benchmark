@@ -77,7 +77,7 @@ cl_int be_device_release(be_device *dev) {
   return 0;
 }
 
-cl_int be_kernel_init(const be_device *dev, int loop_cnt, be_kernel *be_kern) {
+cl_int be_kernel_init(const be_device *dev, be_kernel *be_kern) {
   cl_int rv;
   const char *source =
     "__kernel void kerntest(__global char* data, int loops_cnt) {"
@@ -105,10 +105,6 @@ cl_int be_kernel_init(const be_device *dev, int loop_cnt, be_kernel *be_kern) {
   rv = clSetKernelArg(be_kern->kernel, 0, sizeof(be_kern->buffer), &(be_kern->buffer));
   if (rv) return rv;
 
-  // loop_cnt argument - to be moved
-  rv = clSetKernelArg(be_kern->kernel, 1, sizeof(loop_cnt), &loop_cnt);
-  if (rv) return rv;
-
   return 0;
 }
 
@@ -126,7 +122,11 @@ cl_int be_kernel_release(be_kernel *kern) {
   return 0;
 }
 
-cl_int execute_kernel(const be_kernel* kern, size_t n_workers, size_t* duration) {
+cl_int be_kernel_set_loopcnt(const be_kernel *kern, int loop_cnt) {
+  return clSetKernelArg(kern->kernel, 1, sizeof(loop_cnt), &loop_cnt);
+}
+
+cl_int be_kernel_run(const be_kernel* kern, size_t n_workers, size_t* duration) {
   cl_event exec_ev;
   cl_int rv = clEnqueueNDRangeKernel(kern->device->command_queue, kern->kernel,
 				     1, NULL, &n_workers, NULL, 0, NULL, &exec_ev);
@@ -145,31 +145,30 @@ cl_int execute_kernel(const be_kernel* kern, size_t n_workers, size_t* duration)
   return 0;
 }
 
-//cl_int do_bench_loops(cl_context context, cl_device_id device_id, cl_mem dev_buffer,
-//		      cl_command_queue queue, size_t n_workers,
-//		      int start, int end, int step) {
-//  cl_int rv;
-//  for (int loop_cnt = start; loop_cnt <= end; loop_cnt += step) {
-//    cl_kernel kernel;
-//    rv = get_kernel(context, device_id, dev_buffer, loop_cnt, &kernel);
-//    if (rv) return rv;
-//
-//    size_t duration;
-//    rv = execute_kernel(queue, kernel, n_workers, &duration);
-//    if (rv) return rv;
-//
-//    printf("%d\t%zd\t%lu\n", loop_cnt, n_workers, duration);
-//    fflush(stdout);
-//  }
-//  return 0;
-//}
+cl_int do_bench_loops(const be_kernel *kern, int start, int end, int step) {
+  cl_int rv;
+  for (int loops_cnt = start; loops_cnt <= end; loops_cnt += step) {
+    rv = be_kernel_set_loopcnt(kern, loops_cnt);
+    if (rv) return rv;
+
+    size_t duration;
+    rv = be_kernel_run(kern, DEFAULT_WORKERS_CNT, &duration);
+    if (rv) return rv;
+
+    printf("%d\t%lu\n", loops_cnt, duration);
+    fflush(stdout);
+  }
+  return 0;
+}
 
 cl_int do_bench_workers(const be_kernel *kern, int start, int end, int step) {
   cl_int rv;
+  rv = be_kernel_set_loopcnt(kern, DEFAULT_LOOPS_CNT);
+  if (rv) return rv;
 
   for (size_t n_workers = start; n_workers <= end; n_workers += step) {
     size_t duration;
-    rv = execute_kernel(kern, n_workers, &duration);
+    rv = be_kernel_run(kern, n_workers, &duration);
     if (rv) return rv;
 
     printf("%zd\t%lu\n", n_workers, duration);
@@ -195,7 +194,7 @@ int main() {
   check_success(rv, "be_device_init");
 
   be_kernel bench_kern;
-  rv = be_kernel_init(&bench_dev, DEFAULT_LOOPS_CNT, &bench_kern);
+  rv = be_kernel_init(&bench_dev, &bench_kern);
   check_success(rv, "be_kernel_init");
 
   // Write initial data set into device buffer
@@ -205,13 +204,11 @@ int main() {
   check_success(rv, "clEnqueueWriteBuffer");
   clWaitForEvents(1, &write_ev);
 
-  //rv = do_bench_loops(context, device_id, dev_buffer,
-  //		      command_queue, DEFAULT_N_WORKERS,
-  //		      LOOPCNT_START, LOOPCNT_END, LOOPCNT_STEP);
-  //check_success(rv, "do_bench_loops");
+  rv = do_bench_loops(&bench_kern, LOOPCNT_START, LOOPCNT_END, LOOPCNT_STEP);
+  check_success(rv, "do_bench_loops");
 
-  rv = do_bench_workers(&bench_kern, NWORKERS_START, NWORKERS_END, NWORKERS_STEP);
-  check_success(rv, "do_bench_workers");
+  //rv = do_bench_workers(&bench_kern, NWORKERS_START, NWORKERS_END, NWORKERS_STEP);
+  //check_success(rv, "do_bench_workers");
 
   // Enqueue blocking read command
   rv = clEnqueueReadBuffer(bench_dev.command_queue, bench_kern.buffer, CL_TRUE, 0, data_len,
