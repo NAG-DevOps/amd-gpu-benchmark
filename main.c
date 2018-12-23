@@ -3,18 +3,19 @@
 
 #define BUFFER_SIZE (50000 + 1)
 
-#define DEFAULT_WORKERS_CNT 1024
-#define DEFAULT_LOOPS_CNT 100000
+#define DEFAULT_WORKERS_CNT 1
+#define DEFAULT_LOOPS_CNT 10000
+
+#define WARMUP_WORKERS_CNT 100000
+#define WARMUP_LOOPS_CNT 100000
 
 #define NWORKERS_START 1000
 #define NWORKERS_STEP 1000
-#define NWORKERS_END 50000
+#define NWORKERS_END 100000
 
-#define LOOPCNT_START 10000
-#define LOOPCNT_STEP 10000
-#define LOOPCNT_END 500000
-
-#define SOURCE_SIZE 1024
+#define LOOPCNT_START 1000
+#define LOOPCNT_STEP 1000
+#define LOOPCNT_END 100000
 
 /*
  * be_* for bench specific structures.
@@ -145,6 +146,43 @@ cl_int be_kernel_run(const be_kernel* kern, size_t n_workers, size_t* duration) 
   return 0;
 }
 
+cl_int be_kernel_write_buffer(const be_kernel *kern, const char* host_buffer, int data_len) {
+  cl_event ev;
+  int rv = clEnqueueWriteBuffer(kern->device->command_queue, kern->buffer,
+				CL_FALSE, 0, data_len, host_buffer, 0, NULL, &ev);
+  if (rv) return rv;
+  clWaitForEvents(1, &ev);
+  return 0;
+}
+
+cl_int be_kernel_read_buffer(const be_kernel *kern, char* host_buffer, int data_len) {
+  cl_event ev;
+  int rv = clEnqueueReadBuffer(kern->device->command_queue, kern->buffer,
+			       CL_TRUE, 0, data_len, host_buffer, 0, NULL, &ev);
+  if (rv) return rv;
+  clWaitForEvents(1, &ev);
+  return 0;
+}
+
+void init_host_buffer(char* buffer, int length) {
+  const char message[] = "Hello World!";
+  for (int i=0; i < length; i++) {
+    buffer[i] = message[i % (sizeof(message) - 1)];
+  }
+  buffer[length-1] = '\0';
+}
+
+
+cl_int do_bench_warmup(const be_kernel *kern) {
+  cl_int rv;
+  size_t duration;
+  rv = be_kernel_set_loopcnt(kern, WARMUP_LOOPS_CNT);
+  if (rv) return rv;
+  rv = be_kernel_run(kern, WARMUP_WORKERS_CNT, &duration);
+  if (rv) return rv;
+  return 0;
+}
+
 cl_int do_bench_loops(const be_kernel *kern, int start, int end, int step) {
   cl_int rv;
   for (int loops_cnt = start; loops_cnt <= end; loops_cnt += step) {
@@ -179,15 +217,6 @@ cl_int do_bench_workers(const be_kernel *kern, int start, int end, int step) {
 
 int main() {
   cl_int rv; // OpenCL calls return value
-  const char message[] = "Hello World!";
-  char host_buffer[BUFFER_SIZE];
-  int data_len = BUFFER_SIZE-1;
-
-  // Filling host buffer with our message
-  for (int i=0; i < data_len; i++) {
-    host_buffer[i] = message[i % (sizeof(message) - 1)];
-  }
-  host_buffer[data_len] = '\0';
 
   be_device bench_dev;
   rv = be_device_init(&bench_dev);
@@ -197,12 +226,15 @@ int main() {
   rv = be_kernel_init(&bench_dev, &bench_kern);
   check_success(rv, "be_kernel_init");
 
-  // Write initial data set into device buffer
-  cl_event write_ev;
-  rv = clEnqueueWriteBuffer(bench_dev.command_queue, bench_kern.buffer, CL_FALSE, 0, data_len,
-			    host_buffer, 0, NULL, &write_ev);
-  check_success(rv, "clEnqueueWriteBuffer");
-  clWaitForEvents(1, &write_ev);
+  char host_buffer[BUFFER_SIZE];
+  int data_len = sizeof(host_buffer);
+  init_host_buffer(host_buffer, data_len);
+
+  rv = do_bench_warmup(&bench_kern);
+  check_success(rv, "do_bench_warmup");
+
+  rv = be_kernel_write_buffer(&bench_kern, host_buffer, data_len);
+  check_success(rv, "be_kernel_write_buffer");
 
   rv = do_bench_loops(&bench_kern, LOOPCNT_START, LOOPCNT_END, LOOPCNT_STEP);
   check_success(rv, "do_bench_loops");
@@ -210,11 +242,9 @@ int main() {
   //rv = do_bench_workers(&bench_kern, NWORKERS_START, NWORKERS_END, NWORKERS_STEP);
   //check_success(rv, "do_bench_workers");
 
-  // Enqueue blocking read command
-  rv = clEnqueueReadBuffer(bench_dev.command_queue, bench_kern.buffer, CL_TRUE, 0, data_len,
-			   host_buffer, 0, NULL, NULL);
-  check_success(rv, "clEnqueueReadBuffer");
-  // printf("%s\n", host_buffer);
+  rv = be_kernel_read_buffer(&bench_kern, host_buffer, data_len);
+  check_success(rv, "be_kernel_read_buffer");
+  //printf("%s\n", host_buffer);
 
   // Free resources
   rv = be_kernel_release(&bench_kern);
