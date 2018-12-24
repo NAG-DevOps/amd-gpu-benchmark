@@ -3,10 +3,10 @@ LDFLAGS=-L /opt/amdgpu-pro/lib/x86_64-linux-gnu/ -l OpenCL
 
 all: main main-cpu cl-info
 
-main: main.o
+main: main.o benchlib.o
 	gcc -o $@ $^ ${LDFLAGS}
 
-main-cpu: main-cpu.o
+main-cpu: main-cpu.o benchlib.o
 	gcc -o $@ $^ ${LDFLAGS}
 
 cl-info: cl-info.o

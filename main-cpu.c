@@ -1,6 +1,5 @@
-#include <stdio.h>
-#include <stdlib.h>
 #include <time.h>
+#include "benchlib.h"
 
 #define DEFAULT_WORKERS_CNT 1
 #define DEFAULT_LOOPS_CNT 1000
@@ -15,34 +14,12 @@
 
 #define BUFFER_SIZE 10001
 
-void check_fd_open(FILE* fd) {
-  if (!fd) {
-    perror(NULL);
-    exit(EXIT_FAILURE);
-  }
-}
-
-void check_fd_close(int rv) {
-  if (rv) {
-    perror(NULL);
-    exit(EXIT_FAILURE);
-  }
-}
-
 void kerntest(int id, char* data, int loops_cnt) {
   int tmp = data[id] - 32;
   for (int i=0; i<loops_cnt; i++) {
     tmp = (2*tmp + id) % 95;
   }
   data[id] = (char)(tmp + 32);
-}
-
-void init_host_buffer(char* buffer, int length) {
-  const char message[] = "Hello World!";
-  for (int i=0; i < length; i++) {
-    buffer[i] = message[i % (sizeof(message) - 1)];
-  }
-  buffer[length-1] = '\0';
 }
 
 void do_bench_loops(FILE* out, char* buffer, int start, int end, int step) {

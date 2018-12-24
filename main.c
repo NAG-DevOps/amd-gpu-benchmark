@@ -1,6 +1,5 @@
-#include <stdio.h>
-#include <stdlib.h>
 #include "CL/cl.h"
+#include "benchlib.h"
 
 #define DEFAULT_WORKERS_CNT 1
 #define DEFAULT_LOOPS_CNT 10000
@@ -42,21 +41,6 @@ void check_cl_success(cl_int rv, char* msg) {
     exit(EXIT_FAILURE);
   }
 }
-
-void check_fd_open(FILE* fd) {
-  if (!fd) {
-    perror(NULL);
-    exit(EXIT_FAILURE);
-  }
-}
-
-void check_fd_close(int rv) {
-  if (rv) {
-    perror(NULL);
-    exit(EXIT_FAILURE);
-  }
-}
-
 
 /*
  * Initialize an OpenCL device for our benchmarks.
@@ -178,14 +162,6 @@ cl_int be_kernel_read_buffer(const be_kernel *kern, char* host_buffer, int data_
   if (rv) return rv;
   clWaitForEvents(1, &ev);
   return 0;
-}
-
-void init_host_buffer(char* buffer, int length) {
-  const char message[] = "Hello World!";
-  for (int i=0; i < length; i++) {
-    buffer[i] = message[i % (sizeof(message) - 1)];
-  }
-  buffer[length-1] = '\0';
 }
 
 cl_int do_bench_warmup(const be_kernel *kern) {
