@@ -16,4 +16,4 @@ cl-info: cl-info.o
 	gcc ${CFLAGS} -c $^
 
 clean:
-	rm -f main main-cpu cl-info *.o
+	rm -f main main-cpu cl-info fit.log *.o
