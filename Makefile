@@ -1,5 +1,7 @@
-CFLAGS=-I ~/src/OpenCL-Headers/ -DCL_TARGET_OPENCL_VERSION=200
-LDFLAGS=-L /opt/amdgpu-pro/lib/x86_64-linux-gnu/ -l OpenCL
+#CFLAGS=-I ../OpenCL-Headers/ -DCL_TARGET_OPENCL_VERSION=200
+#CFLAGS=-DCL_TARGET_OPENCL_VERSION=200
+CFLAGS=-I /opt/amdgpu-pro/include -DCL_TARGET_OPENCL_VERSION=200
+LDFLAGS=-L /opt/amdgpu-pro/lib64 -lOpenCL
 
 all: main main-cpu cl-info
 
